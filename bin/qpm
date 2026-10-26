@@ -1,0 +1,16 @@
+#!/usr/bin/env sh
+# Zero-install launcher: runs qpm straight from this checkout.
+# Symlink it onto $PATH (ln -s "$PWD/bin/qpm" /usr/local/bin/qpm) or call it
+# directly; it works from any working directory and needs no pip install.
+set -eu
+self=$0
+# Resolve symlinks so the launcher can live on $PATH.
+while [ -L "$self" ]; do
+    target=$(readlink "$self")
+    case $target in
+        /*) self=$target ;;
+        *) self=$(dirname -- "$self")/$target ;;
+    esac
+done
+root=$(CDPATH= cd -- "$(dirname -- "$self")/.." && pwd)
+PYTHONPATH="$root${PYTHONPATH:+:$PYTHONPATH}" exec "${PYTHON:-python3}" -m qpm "$@"

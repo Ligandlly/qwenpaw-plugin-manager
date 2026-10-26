@@ -1,0 +1,36 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "qwenpaw-plugin-manager"
+version = "0.1.0"
+description = "Fleet plugin management (install/upgrade/uninstall) for QwenPaw Hub runtimes"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = []
+classifiers = [
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Environment :: Console",
+  "Operating System :: POSIX :: Linux",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8"]
+
+[project.scripts]
+qpm = "qpm.cli:entrypoint"
+qwenpaw-plugin-manager = "qpm.cli:entrypoint"
+
+[tool.setuptools]
+packages = ["qpm"]
+
+[tool.setuptools.package-data]
+qpm = ["web/*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"

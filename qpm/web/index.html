@@ -1,0 +1,296 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>QwenPaw Fleet · Plugin Control</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="masthead">
+    <div class="masthead__brand">
+      <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+        <path d="M6 4v24M26 4v24M6 10h6M20 22h6M12 16h8" />
+        <circle cx="16" cy="16" r="2.4" />
+      </svg>
+      <div>
+        <p class="eyebrow">QwenPaw Hub · local console</p>
+        <h1>Fleet <em>Plugin</em> Control</h1>
+      </div>
+    </div>
+    <div class="masthead__meta">
+      <span class="lamp" id="conn-lamp" data-state="idle" aria-hidden="true"></span>
+      <span class="conn" id="conn-text">connecting</span>
+      <button class="btn btn--ghost" id="btn-refresh" type="button">Refresh fleet</button>
+    </div>
+  </header>
+
+  <div class="shell">
+    <aside class="rail" aria-label="Targets">
+      <section class="rail__block">
+        <div class="rail__head">
+          <h2>Targets</h2>
+          <div class="rail__tools">
+            <button class="link" type="button" data-target="all">All</button>
+            <span aria-hidden="true">/</span>
+            <button class="link" type="button" data-target="none">None</button>
+          </div>
+        </div>
+        <input class="field" id="target-filter" type="search" placeholder="Filter id or tenant" autocomplete="off">
+        <div class="targets" id="target-list">
+          <p class="empty">Discovering runtimes…</p>
+        </div>
+        <label class="check">
+          <input type="checkbox" id="include-stopped">
+          <span>Include stopped runtimes</span>
+        </label>
+        <p class="hint" id="selection-hint"></p>
+      </section>
+
+      <section class="rail__block rail__stats" id="fleet-stats" aria-live="polite">
+        <p class="empty">No data yet.</p>
+      </section>
+
+      <section class="rail__block" id="token-block" hidden>
+        <h2>Console token</h2>
+        <p class="hint">Paste the token printed by <code>qpm serve</code> (or open the URL it prints).</p>
+        <form class="token-form" id="token-form">
+          <input class="field" id="token-input" type="password" autocomplete="off" spellcheck="false" aria-label="Console token">
+          <button class="btn" type="submit">Unlock</button>
+        </form>
+      </section>
+    </aside>
+
+    <main class="main" id="main">
+      <nav class="tabs" role="tablist" aria-label="Console views">
+        <button class="tab" role="tab" type="button" id="tab-inventory" data-view="inventory" aria-selected="true" aria-controls="view-inventory">Inventory</button>
+        <button class="tab" role="tab" type="button" id="tab-install" data-view="install" aria-selected="false" aria-controls="view-install">Install &amp; upgrade</button>
+        <button class="tab" role="tab" type="button" id="tab-uninstall" data-view="uninstall" aria-selected="false" aria-controls="view-uninstall">Uninstall</button>
+        <button class="tab" role="tab" type="button" id="tab-apply" data-view="apply" aria-selected="false" aria-controls="view-apply">Apply state</button>
+        <button class="tab" role="tab" type="button" id="tab-jobs" data-view="jobs" aria-selected="false" aria-controls="view-jobs">Runs <span class="badge" id="job-badge" hidden></span></button>
+      </nav>
+
+      <!-- Inventory ------------------------------------------------------ -->
+      <section class="view" id="view-inventory" role="tabpanel" aria-labelledby="tab-inventory">
+        <header class="view__head">
+          <div>
+            <p class="eyebrow">Fleet</p>
+            <h2>Inventory</h2>
+            <p class="lede">One strip per runtime container. Each slot is an installed plugin; actions are scoped to that runtime.</p>
+          </div>
+          <input class="field field--narrow" id="plugin-filter" type="search" placeholder="Filter plugins" autocomplete="off">
+        </header>
+        <div class="inventory" id="inventory">
+          <p class="empty">Waiting for runtime data…</p>
+        </div>
+      </section>
+
+      <!-- Install -------------------------------------------------------- -->
+      <section class="view" id="view-install" role="tabpanel" aria-labelledby="tab-install" hidden>
+        <header class="view__head">
+          <div>
+            <p class="eyebrow">Distribute</p>
+            <h2>Install &amp; upgrade</h2>
+            <p class="lede">Upload bundles or point at a path on the Hub host. The plan compares versions per runtime before anything moves.</p>
+          </div>
+        </header>
+
+        <form class="form" id="install-form">
+          <fieldset class="fieldset">
+            <legend>Sources</legend>
+            <div class="source-list" id="install-sources">
+              <div class="source-row">
+                <input class="field" type="text" data-source placeholder="Server path, https:// URL, or uploaded bundle" spellcheck="false">
+                <button class="btn btn--ghost btn--icon" type="button" data-remove-source aria-label="Remove source">×</button>
+              </div>
+            </div>
+            <div class="source-actions">
+              <button class="btn btn--ghost" type="button" id="btn-add-source">Add path or URL</button>
+            </div>
+            <div class="drop" id="dropzone">
+              <p>Drop plugin <code>.zip</code> bundles here, or</p>
+              <button class="btn" type="button" id="btn-pick-files">Choose files</button>
+              <input type="file" id="file-input" accept=".zip" multiple hidden>
+            </div>
+          </fieldset>
+
+          <div class="form-grid">
+            <fieldset class="fieldset">
+              <legend>Mode</legend>
+              <div class="segmented" role="radiogroup" aria-label="Sync mode">
+                <label><input type="radio" name="mode" value="sync" checked><span>Sync</span></label>
+                <label><input type="radio" name="mode" value="install"><span>Install only</span></label>
+                <label><input type="radio" name="mode" value="upgrade"><span>Upgrade only</span></label>
+              </div>
+              <p class="hint">Sync converges versions; install only fills gaps; upgrade only touches older installed plugins.</p>
+            </fieldset>
+
+            <fieldset class="fieldset">
+              <legend>After install</legend>
+              <div class="segmented" role="radiogroup" aria-label="Enabled state">
+                <label><input type="radio" name="enable" value="keep" checked><span>Keep</span></label>
+                <label><input type="radio" name="enable" value="enable"><span>Enable</span></label>
+                <label><input type="radio" name="enable" value="disable"><span>Disable</span></label>
+              </div>
+              <p class="hint">Keep leaves each runtime's stored enabled flag untouched.</p>
+            </fieldset>
+          </div>
+
+          <details class="more">
+            <summary>Advanced</summary>
+            <div class="form-grid">
+              <fieldset class="fieldset">
+                <legend>Options</legend>
+                <label class="check"><input type="checkbox" name="install_missing" checked><span>Install missing plugins in upgrade mode</span></label>
+                <label class="check"><input type="checkbox" name="reinstall"><span>Reinstall when already at target version</span></label>
+                <label class="check"><input type="checkbox" name="allow_downgrade"><span>Allow downgrade</span></label>
+              </fieldset>
+              <fieldset class="fieldset">
+                <legend>Scope</legend>
+                <label class="stacked"><span>Only these plugin ids</span><input class="field" type="text" name="plugins" placeholder="glob, e.g. offline-*"></label>
+                <label class="stacked"><span>Never touch</span><input class="field" type="text" name="protect" placeholder="ids or globs"></label>
+              </fieldset>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button class="btn" type="button" id="install-preview">Preview plan</button>
+            <button class="btn btn--primary" type="button" id="install-run" disabled>Run changes</button>
+            <span class="hint" id="install-hint">Nothing runs until you confirm the plan.</span>
+          </div>
+        </form>
+        <div class="plan" id="install-plan" hidden></div>
+      </section>
+
+      <!-- Uninstall ------------------------------------------------------ -->
+      <section class="view" id="view-uninstall" role="tabpanel" aria-labelledby="tab-uninstall" hidden>
+        <header class="view__head">
+          <div>
+            <p class="eyebrow">Remove</p>
+            <h2>Uninstall</h2>
+            <p class="lede">Snapshots are taken on the host before deletion, so a failed removal can be restored.</p>
+          </div>
+        </header>
+
+        <form class="form" id="uninstall-form">
+          <fieldset class="fieldset">
+            <legend>Plugins</legend>
+            <input class="field" type="text" name="plugins" id="uninstall-plugins" placeholder="ids or globs, space or comma separated">
+            <div class="chips" id="installed-chips"><p class="hint">Load the fleet to see installed plugins.</p></div>
+            <label class="check"><input type="checkbox" name="keep_files"><span>Keep files and configuration (unload only)</span></label>
+            <label class="stacked"><span>Never touch</span><input class="field" type="text" name="protect" placeholder="ids or globs"></label>
+          </fieldset>
+          <div class="actions">
+            <button class="btn" type="button" id="uninstall-preview">Preview plan</button>
+            <button class="btn btn--danger" type="button" id="uninstall-run" disabled>Run changes</button>
+          </div>
+        </form>
+        <div class="plan" id="uninstall-plan" hidden></div>
+      </section>
+
+      <!-- Apply ---------------------------------------------------------- -->
+      <section class="view" id="view-apply" role="tabpanel" aria-labelledby="tab-apply" hidden>
+        <header class="view__head">
+          <div>
+            <p class="eyebrow">Converge</p>
+            <h2>Apply state</h2>
+            <p class="lede">Paste a state document, or freeze one runtime and edit it. Entries without a source become drift checks.</p>
+          </div>
+        </header>
+
+        <form class="form" id="apply-form">
+          <fieldset class="fieldset">
+            <legend>State document</legend>
+            <div class="apply-tools">
+              <label class="inline">
+                <span>Freeze from</span>
+                <select class="field" id="freeze-runtime"></select>
+              </label>
+              <button class="btn btn--ghost" type="button" id="btn-freeze">Load state</button>
+              <button class="btn btn--ghost" type="button" id="btn-download-state">Download JSON</button>
+              <button class="btn btn--ghost" type="button" id="btn-upload-state">Load file</button>
+              <input type="file" id="state-file" accept=".json,application/json" hidden>
+            </div>
+            <textarea class="field code" id="state-text" rows="16" spellcheck="false" placeholder='{
+  "schema_version": 1,
+  "plugins": [
+    {"id": "offline-market", "version": "0.1.3", "source": "./dist/offline-market-0.1.3.zip"}
+  ],
+  "removed": []
+}'></textarea>
+            <p class="hint" id="state-hint">Sources resolve on the Hub host. Upload a zip in Install, then reference it as <code>@up_…</code>.</p>
+          </fieldset>
+
+          <details class="more">
+            <summary>Advanced</summary>
+            <div class="form-grid">
+              <fieldset class="fieldset">
+                <legend>Options</legend>
+                <div class="segmented" role="radiogroup" aria-label="Apply mode">
+                  <label><input type="radio" name="apply-mode" value="sync" checked><span>Sync</span></label>
+                  <label><input type="radio" name="apply-mode" value="install"><span>Install only</span></label>
+                  <label><input type="radio" name="apply-mode" value="upgrade"><span>Upgrade only</span></label>
+                </div>
+                <label class="check"><input type="checkbox" name="apply_install_missing" checked><span>Install missing plugins in upgrade mode</span></label>
+                <label class="check"><input type="checkbox" name="apply_reinstall"><span>Reinstall when already at target version</span></label>
+                <label class="check"><input type="checkbox" name="apply_allow_downgrade"><span>Allow downgrade</span></label>
+              </fieldset>
+              <fieldset class="fieldset">
+                <legend>Scope</legend>
+                <label class="stacked"><span>Only these plugin ids</span><input class="field" type="text" name="apply_plugins" placeholder="glob, e.g. offline-*"></label>
+                <label class="stacked"><span>Never touch</span><input class="field" type="text" name="apply_protect" placeholder="ids or globs"></label>
+              </fieldset>
+            </div>
+          </details>
+
+          <div class="actions">
+            <button class="btn" type="button" id="apply-preview">Preview plan</button>
+            <button class="btn btn--primary" type="button" id="apply-run" disabled>Run changes</button>
+            <span class="hint" id="apply-status"></span>
+          </div>
+        </form>
+        <div class="plan" id="apply-plan" hidden></div>
+      </section>
+
+      <!-- Jobs ----------------------------------------------------------- -->
+      <section class="view" id="view-jobs" role="tabpanel" aria-labelledby="tab-jobs" hidden>
+        <header class="view__head">
+          <div>
+            <p class="eyebrow">History</p>
+            <h2>Runs</h2>
+            <p class="lede">Each run re-plans against the live fleet, then executes runtime by runtime.</p>
+          </div>
+        </header>
+        <div class="jobs">
+          <div class="jobs__list" id="jobs-list"><p class="empty">No runs yet.</p></div>
+          <div class="jobs__detail" id="job-detail"><p class="empty">Select a run to inspect it.</p></div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <footer class="footer">
+    <span id="footer-meta">qpm console</span>
+    <span class="footer__hint">loopback only · token required</span>
+  </footer>
+
+  <dialog class="dialog" id="confirm-dialog" aria-labelledby="confirm-title">
+    <form method="dialog" class="dialog__form">
+      <p class="eyebrow">Confirm</p>
+      <h2 id="confirm-title">Run changes?</h2>
+      <div class="dialog__body" id="confirm-body"></div>
+      <div class="dialog__actions">
+        <button class="btn btn--ghost" value="cancel" type="submit">Cancel</button>
+        <button class="btn btn--primary" value="confirm" type="submit" id="confirm-ok">Run changes</button>
+      </div>
+    </form>
+  </dialog>
+
+  <div class="toasts" id="toasts" aria-live="polite" aria-atomic="false"></div>
+
+  <script src="/app.js" defer></script>
+</body>
+</html>
