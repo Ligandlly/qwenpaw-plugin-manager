@@ -71,13 +71,14 @@ jobs:
         uses: docker/metadata-action@v5
         with:
           images: ${{ steps.image.outputs.name }}
-          # latest comes from the auto flavor (default branch / semver tags);
-          # do not add a raw latest tag or it will be duplicated.
+          # `flavor: latest=auto` only emits latest for semver tags, so the
+          # default branch needs an explicit raw latest tag.
           flavor: latest=auto
           tags: |
             type=ref,event=branch
             type=ref,event=tag
             type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
             type=sha,format=long
 
       - name: Build image
