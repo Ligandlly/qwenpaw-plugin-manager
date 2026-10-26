@@ -1,5 +1,8 @@
 # qwenpaw-plugin-manager
 
+[![tests](https://github.com/Ligandlly/qwenpaw-plugin-manager/actions/workflows/tests.yml/badge.svg)](https://github.com/Ligandlly/qwenpaw-plugin-manager/actions/workflows/tests.yml)
+[![image](https://github.com/Ligandlly/qwenpaw-plugin-manager/actions/workflows/image.yml/badge.svg)](https://github.com/Ligandlly/qwenpaw-plugin-manager/actions/workflows/image.yml)
+
 给 **QwenPaw Hub 用 Docker 拉起的每个用户运行时**做插件统一管理的命令行工具：
 批量安装、批量升级、批量卸载、批量启停，外加"声明式收敛"（`freeze` → `apply`）。
 
@@ -53,6 +56,37 @@ qpm --version                   # 同时注册了 qwenpaw-plugin-manager
 ```
 
 要求：Python ≥ 3.11，能执行 `docker` 命令（或提供 `--inventory`）。
+
+## Docker 镜像
+
+`linux/amd64` 镜像在 main / `v*` tag 上自动构建并推到 ghcr.io；打 tag 时还会额外生成
+可直接 `docker load` 的离线 tarball（挂在 Release 和 Actions artifact 上）。
+
+```bash
+docker pull ghcr.io/ligandlly/qwenpaw-plugin-manager:latest
+
+# CLI 用法：必须挂宿主机 Docker socket，qpm 靠它发现运行时
+docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/ligandlly/qwenpaw-plugin-manager:latest plugins
+
+# 网页控制台：日志里会打印 token 和访问地址
+docker run --rm -p 127.0.0.1:8787:8787 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/ligandlly/qwenpaw-plugin-manager:latest
+```
+
+镜像里带静态 Docker CLI，构建时不执行 pip、不依赖网络（只用 `PYTHONPATH`）。
+
+注意：容器内 `docker inspect` 返回的 `Mounts.Source` 是宿主机路径，容器里看不到，
+所以**宿主机快照 / 自动回滚不可用**；安装、升级、卸载、启停、网页控制台都正常。
+需要回滚能力就把仓库拷到 Hub 宿主机上用 `bin/qpm` 跑。
+
+离线机器用 Release 里的 tarball：
+
+```bash
+sha256sum -c qwenpaw-plugin-manager-image-<ver>-linux-amd64.tar.sha256
+docker load -i qwenpaw-plugin-manager-image-<ver>-linux-amd64.tar
+```
 
 ## 快速开始
 

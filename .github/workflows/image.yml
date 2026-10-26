@@ -1,0 +1,169 @@
+name: image
+
+# Builds the x86_64 (linux/amd64) container image:
+#   * every push/PR touching the package → build + smoke test
+#   * main/tags → also push to ghcr.io, export a `docker load`-able tarball
+#   * v* tags → attach that tarball to the GitHub Release
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+    paths:
+      - "qpm/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - ".github/workflows/image.yml"
+  pull_request:
+    paths:
+      - "qpm/**"
+      - "Dockerfile"
+      - ".dockerignore"
+      - "pyproject.toml"
+      - ".github/workflows/image.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: image-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  image:
+    name: build image (linux/amd64)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # attach the tarball to the Release (tags only)
+      packages: write # push to ghcr.io
+    steps:
+      - uses: actions/checkout@v4
+
+      # Only tested code is allowed to become an image; this is the same suite
+      # the `tests` workflow runs, kept here so the image job is self-contained.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Test
+        run: |
+          python -m pip install -e '.[dev]'
+          python -m pytest -q
+
+      # ghcr requires a lowercase repository path; GitHub owners may not be.
+      - name: Resolve image name
+        id: image
+        run: echo "name=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_OUTPUT"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Log in to ghcr.io
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Image metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ steps.image.outputs.name }}
+          # latest comes from the auto flavor (default branch / semver tags);
+          # do not add a raw latest tag or it will be duplicated.
+          flavor: latest=auto
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=semver,pattern={{version}}
+            type=sha,format=long
+
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: Dockerfile
+          platforms: linux/amd64
+          # Loaded locally for the smoke test below; pushed only outside PRs.
+          load: true
+          push: ${{ github.event_name != 'pull_request' }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          # Older Docker daemons reject attestation manifests.
+          provenance: false
+          sbom: false
+          cache-from: type=gha,scope=qpm-image
+          cache-to: type=gha,mode=max,scope=qpm-image,ignore-error=true
+
+      - name: Smoke test image
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          primary="$(printf '%s\n' "$TAGS" | head -n1)"
+          echo "smoke testing $primary"
+          docker image inspect "$primary" >/dev/null
+          docker run --rm "$primary" --version
+
+          # The console assets must be inside the image, not just in the repo.
+          docker run --rm --entrypoint python "$primary" -c \
+            "from qpm.webapi import WEB_DIR, _STATIC_FILES; missing=[n for n,_ in _STATIC_FILES.values() if not (WEB_DIR/n).is_file()]; assert not missing, missing"
+
+          docker run -d --name qpm-smoke "$primary" \
+            serve --host 127.0.0.1 --port 8787 --no-token >/dev/null
+          trap 'docker rm -f qpm-smoke >/dev/null 2>&1 || true' EXIT
+
+          ok=0
+          for _ in $(seq 1 30); do
+            if docker exec qpm-smoke python -c \
+              "import json,urllib.request; d=json.load(urllib.request.urlopen('http://127.0.0.1:8787/api/meta')); assert d['token_required'] is False"; then
+              ok=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [ "$ok" != 1 ]; then
+            docker logs qpm-smoke || true
+            exit 1
+          fi
+          echo "console responded on /api/meta"
+
+          # CLI mode must at least start and render help without a socket.
+          docker run --rm "$primary" --help >/dev/null
+          echo "smoke test passed"
+
+      # Offline hosts cannot reach ghcr, so publish a tarball they can load.
+      - name: Export image tarball
+        if: github.event_name != 'pull_request'
+        env:
+          TAGS: ${{ steps.meta.outputs.tags }}
+        run: |
+          set -euo pipefail
+          version="$(sed -n 's/^__version__ = "\(.*\)"/\1/p' qpm/__init__.py)"
+          primary="$(printf '%s\n' "$TAGS" | head -n1)"
+          echo "exporting $primary (version $version)"
+          docker save -o "qwenpaw-plugin-manager-image-${version}-linux-amd64.tar" "$primary"
+          sha256sum "qwenpaw-plugin-manager-image-${version}-linux-amd64.tar" \
+            > "qwenpaw-plugin-manager-image-${version}-linux-amd64.tar.sha256"
+          ls -lh qwenpaw-plugin-manager-image-*.tar*
+
+      - name: Upload image artifact
+        if: github.event_name != 'pull_request'
+        uses: actions/upload-artifact@v4
+        with:
+          name: qwenpaw-plugin-manager-image-linux-amd64
+          path: |
+            qwenpaw-plugin-manager-image-*-linux-amd64.tar
+            qwenpaw-plugin-manager-image-*-linux-amd64.tar.sha256
+          retention-days: 14
+
+      - name: Attach image tarball to Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            qwenpaw-plugin-manager-image-*-linux-amd64.tar
+            qwenpaw-plugin-manager-image-*-linux-amd64.tar.sha256
+          generate_release_notes: false
