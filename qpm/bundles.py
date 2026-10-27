@@ -26,6 +26,7 @@ import zipfile
 from pathlib import Path, PurePosixPath
 from typing import Iterable
 
+from . import logs
 from .errors import SourceError
 from .models import PluginBundle
 
@@ -63,6 +64,8 @@ _SKIP_FILE_SUFFIXES = frozenset({".pyc", ".pyo", ".log", ".swp"})
 _SKIP_FILE_NAMES = frozenset({".DS_Store", "Thumbs.db", "desktop.ini"})
 _FIXED_DATE = (1980, 1, 1, 0, 0, 0)
 _FILE_MODE = 0o644
+
+_LOG = logs.get_logger("bundles")
 
 
 def sha256_hex(data: bytes) -> str:
@@ -316,6 +319,12 @@ def build_bundle_from_dir(
 
 
 def _download(url: str, *, timeout: float, max_bytes: int) -> bytes:
+    _LOG.debug(
+        "downloading %s (timeout %.0fs, cap %d byte(s))",
+        url,
+        timeout,
+        max_bytes,
+    )
     request = urllib.request.Request(
         url,
         headers={"Accept": "application/zip, application/octet-stream"},
@@ -345,6 +354,7 @@ def _download(url: str, *, timeout: float, max_bytes: int) -> bytes:
         raise SourceError(f"{url}: download failed with HTTP {exc.code}") from exc
     except (urllib.error.URLError, TimeoutError, OSError) as exc:
         raise SourceError(f"{url}: download failed: {exc}") from exc
+    _LOG.debug("downloaded %d byte(s) from %s", len(b"".join(chunks)), url)
     return b"".join(chunks)
 
 
@@ -363,6 +373,7 @@ def load_bundle_source(
     text = str(source or "").strip()
     if not text:
         raise SourceError("empty bundle source")
+    _LOG.debug("loading bundle source %s", text)
     if text.startswith(("http://", "https://")):
         return [
             bundle_from_zip_bytes(
@@ -393,6 +404,7 @@ def load_bundle_source(
 
     bundles: list[PluginBundle] = []
     skipped: list[str] = []
+    _LOG.debug("scanning release directory %s", path)
     for child in sorted(path.iterdir(), key=lambda item: item.name):
         if child.is_dir() and (child / "plugin.json").is_file():
             bundles.append(build_bundle_from_dir(child, max_bytes=max_bytes))
@@ -415,6 +427,12 @@ def load_bundle_source(
             + (f" (ignored: {', '.join(skipped[:5])})" if skipped else ""),
         )
     _reject_duplicate_ids(bundles)
+    _LOG.debug(
+        "%s: %d bundle(s)%s",
+        path,
+        len(bundles),
+        f", ignored {len(skipped)} entr(ies)" if skipped else "",
+    )
     return bundles
 
 

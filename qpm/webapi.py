@@ -2,13 +2,14 @@
 """Local web console for the fleet plugin manager.
 
 Why a server at all: the browser cannot run ``docker inspect`` or open loopback
-connections to every runtime.  This module is a thin, loopback-only HTTP layer
-over the exact same discovery / planning / execution modules the CLI uses, so
-the console can never diverge from ``qpm install``.
+connections to every runtime.  This module is a thin HTTP layer over the exact
+same discovery / planning / execution modules the CLI uses, so the console can
+never diverge from ``qpm install``.
 
 Security posture (the tool can change every tenant runtime, so this matters):
 
-* binds to ``127.0.0.1`` by default;
+* binds to ``127.0.0.1`` by default, and to every interface (``0.0.0.0``) when
+  ``--no-token`` asks for an unauthenticated console;
 * every ``/api`` call needs ``X-QPM-Token`` (random per start unless
   ``--no-token``), compared with :func:`hmac.compare_digest`;
 * state-changing calls must be ``application/json`` (or multipart for uploads)
@@ -26,6 +27,7 @@ import json
 import re
 import secrets
 import shutil
+import socket
 import sys
 import tempfile
 import threading
@@ -72,8 +74,14 @@ __all__ = [
     "WebContext",
     "build_plan",
     "create_server",
+    "resolve_bind_host",
     "serve",
 ]
+
+LOOPBACK_HOST = "127.0.0.1"
+#: Bound when the token is disabled: no credential means the operator wants
+#: to reach the console from other hosts, not just from this machine.
+PUBLIC_HOST = "0.0.0.0"
 
 WEB_DIR = Path(__file__).with_name("web")
 _MAX_JSON_BYTES = 1024 * 1024
@@ -109,13 +117,30 @@ class WebConfig:
 
     discovery: DiscoveryOptions = field(default_factory=DiscoveryOptions)
     exec_options: ExecOptions = field(default_factory=ExecOptions)
-    host: str = "127.0.0.1"
+    host: str = LOOPBACK_HOST
     port: int = 8787
     token: str = ""
     token_required: bool = True
     host_sdk: str = "1.0.0"
     open_browser: bool = False
     workdir: Path | None = None
+
+
+def resolve_bind_host(
+    host: str | None = None,
+    *,
+    token_required: bool = True,
+) -> str:
+    """Pick the bind address for an explicit ``--host`` or a token policy.
+
+    ``--no-token`` opens the console to the network: an unauthenticated
+    console that only listens on loopback is useless to the operator who
+    asked for one.  An explicit ``--host`` always wins.
+    """
+    explicit = str(host or "").strip()
+    if explicit:
+        return explicit
+    return LOOPBACK_HOST if token_required else PUBLIC_HOST
 
 
 def _now() -> str:
@@ -1195,28 +1220,59 @@ def create_server(config: WebConfig) -> ThreadingHTTPServer:
     return server
 
 
+def _reachable_addresses() -> list[str]:
+    """Best-effort list of this host's non-loopback IPv4 addresses."""
+    addresses: list[str] = []
+    try:
+        for info in socket.getaddrinfo(
+            socket.gethostname(),
+            None,
+            socket.AF_INET,
+        ):
+            address = str(info[4][0])
+            if address not in addresses and not address.startswith("127."):
+                addresses.append(address)
+    except OSError:
+        pass
+    if not addresses:
+        # Hostnames often do not resolve inside containers; ask the routing
+        # table instead (UDP connect sends nothing).
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as probe:
+                probe.connect(("192.0.2.1", 9))  # TEST-NET-1
+                address = str(probe.getsockname()[0])
+                if address and not address.startswith("127."):
+                    addresses.append(address)
+        except OSError:
+            pass
+    return addresses
+
+
 def serve(config: WebConfig) -> int:
     """Run the console until interrupted."""
     server = create_server(config)
     context: WebContext = server.ctx  # type: ignore[attr-defined]
     host, port = server.server_address[:2]
-    display_host = "127.0.0.1" if host in {"0.0.0.0", "::"} else host
+    bound_everywhere = str(host) in {"0.0.0.0", "::", ""}
+    display_host = LOOPBACK_HOST if bound_everywhere else host
     token_fragment = (
         f"#token={config.token}" if config.token_required else ""
     )
     url = f"http://{display_host}:{port}/{token_fragment}"
-    loopback = host in {"127.0.0.1", "::1", "localhost"}
+    loopback = str(host) in {LOOPBACK_HOST, "::1", "localhost"}
     if not loopback:
         print(
-            "[qpm] WARNING: console is bound beyond loopback; anyone who can "
-            "reach this port and holds the token can change every runtime",
+            f"[qpm] WARNING: console is listening on {host}:{port} (all "
+            "interfaces); anyone who can reach this port"
+            + (" and holds the token" if config.token_required else "")
+            + " can change every runtime",
             file=sys.stderr,
             flush=True,
         )
     if not config.token_required:
         print(
-            "[qpm] WARNING: console token disabled; any local page that can "
-            "reach this port can change the fleet",
+            "[qpm] WARNING: console token disabled; any page or script that "
+            "can reach this port can change the fleet",
             file=sys.stderr,
             flush=True,
         )
@@ -1227,8 +1283,18 @@ def serve(config: WebConfig) -> int:
             flush=True,
         )
     print(f"[qpm] console ready: {url}", file=sys.stderr, flush=True)
+    if bound_everywhere:
+        for address in _reachable_addresses():
+            print(
+                f"[qpm] also reachable at: http://{address}:{port}/"
+                f"{token_fragment}",
+                file=sys.stderr,
+                flush=True,
+            )
     print(
-        "[qpm] loopback-only by default; Ctrl-C to stop",
+        "[qpm] listening on all interfaces; Ctrl-C to stop"
+        if bound_everywhere
+        else "[qpm] loopback-only by default; Ctrl-C to stop",
         file=sys.stderr,
         flush=True,
     )

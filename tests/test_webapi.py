@@ -16,7 +16,7 @@ import pytest
 from qpm.bundles import build_bundle_from_dir
 from qpm.executor import ExecOptions
 from qpm.sources import DiscoveryOptions
-from qpm.webapi import WebConfig, create_server
+from qpm.webapi import WebConfig, create_server, resolve_bind_host
 
 _OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -581,3 +581,25 @@ def test_dry_run_console_never_changes_a_runtime(
         assert runtime.plugins == {}
     finally:
         fixture.stop()
+
+
+# ── bind address policy ──────────────────────────────────────────────────
+
+
+def test_bind_host_defaults_to_loopback_when_token_is_required() -> None:
+    assert resolve_bind_host(None, token_required=True) == "127.0.0.1"
+    assert resolve_bind_host("", token_required=True) == "127.0.0.1"
+    assert resolve_bind_host("   ", token_required=True) == "127.0.0.1"
+
+
+def test_no_token_listens_on_every_interface() -> None:
+    assert resolve_bind_host(None, token_required=False) == "0.0.0.0"
+    assert resolve_bind_host("", token_required=False) == "0.0.0.0"
+
+
+def test_explicit_host_wins_over_the_no_token_default() -> None:
+    assert (
+        resolve_bind_host("127.0.0.1", token_required=False) == "127.0.0.1"
+    )
+    assert resolve_bind_host("10.1.2.3", token_required=False) == "10.1.2.3"
+    assert resolve_bind_host("10.1.2.3", token_required=True) == "10.1.2.3"

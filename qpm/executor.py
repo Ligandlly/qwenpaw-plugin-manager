@@ -21,6 +21,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Callable
 
+from . import logs
 from .backup import Backup, create_backup, default_backup_root, restore_backup
 from .errors import (
     PluginAlreadyInstalled,
@@ -40,6 +41,8 @@ from .runtime_client import RuntimeClient
 from .versions import compare, parse_version
 
 __all__ = ["ExecOptions", "Executor"]
+
+_LOG = logs.get_logger("executor")
 
 
 @dataclass
@@ -104,6 +107,12 @@ class Executor:
 
         results: list[ActionResult] = []
         workers = max(1, min(self.options.concurrency, len(order)))
+        _LOG.debug(
+            "executing %d action(s) across %d runtime(s) with %d worker(s)",
+            len(actions),
+            len(order),
+            workers,
+        )
         if workers == 1:
             for key in order:
                 results.extend(
@@ -182,6 +191,15 @@ class Executor:
         started = time.monotonic()
         result = ActionResult(action=action, state=ActionState.PLANNED)
         backup: Backup | None = None
+        _LOG.debug(
+            "%s: start %s %s (%s -> %s)%s",
+            action.target.runtime_id,
+            action.kind.value,
+            action.plugin_id,
+            action.current_version or "-",
+            action.target_version or "-",
+            " [dry-run]" if self.options.dry_run else "",
+        )
         try:
             if action.kind == ActionKind.RUNTIME:
                 result.state = ActionState.FAILED
@@ -218,7 +236,19 @@ class Executor:
                 backup = outcome.backup
                 if backup is not None:
                     result.backup_path = str(backup.backup_dir)
+                    _LOG.debug(
+                        "%s: snapshot %s to %s",
+                        action.target.runtime_id,
+                        action.plugin_id,
+                        backup.backup_dir,
+                    )
                 elif outcome.note:
+                    _LOG.debug(
+                        "%s: no snapshot for %s (%s)",
+                        action.target.runtime_id,
+                        action.plugin_id,
+                        outcome.note,
+                    )
                     result.details["backup_note"] = outcome.note
 
             if action.kind in {
@@ -245,6 +275,13 @@ class Executor:
         except Exception as exc:  # noqa: BLE001 - reported, never raised
             result.state = ActionState.FAILED
             result.message = self._failure_message(exc)
+            _LOG.debug(
+                "%s: %s %s failed: %s",
+                action.target.runtime_id,
+                action.kind.value,
+                action.plugin_id,
+                result.message,
+            )
             status = getattr(exc, "status", None)
             result.http_status = status if isinstance(status, int) else None
             if (
@@ -271,6 +308,15 @@ class Executor:
                     result.details["no_rollback_note_shown"] = True
         finally:
             result.duration_ms = int((time.monotonic() - started) * 1000)
+            _LOG.debug(
+                "%s: %s %s -> %s in %dms%s",
+                action.target.runtime_id,
+                action.kind.value,
+                action.plugin_id,
+                result.state.value,
+                result.duration_ms,
+                f" ({result.message})" if result.message else "",
+            )
         return result
 
     # ── operations ───────────────────────────────────────────────────────
@@ -402,10 +448,22 @@ class Executor:
         backup: Backup,
     ) -> str:
         try:
+            _LOG.debug(
+                "%s: restoring %s files from %s",
+                action.target.runtime_id,
+                action.plugin_id,
+                backup.backup_dir,
+            )
             restore_backup(backup)
         except OSError as exc:
             return f"rollback failed: cannot restore files ({exc})"
         try:
+            _LOG.debug(
+                "%s: reinstalling %s from %s",
+                action.target.runtime_id,
+                action.plugin_id,
+                backup.container_path,
+            )
             client.install_path(
                 backup.container_path,
                 force=True,

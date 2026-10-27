@@ -8,7 +8,7 @@ import os
 import sys
 from pathlib import Path
 
-from . import __version__
+from . import __version__, logs
 from .commands import (
     cmd_apply,
     cmd_doctor,
@@ -182,7 +182,9 @@ def _common_parser() -> argparse.ArgumentParser:
         "--verbose",
         action="store_true",
         default=argparse.SUPPRESS,
-        help="print per-runtime debug detail",
+        help=(
+            "print debug detail (discovery, HTTP calls, planning) to stderr"
+        ),
     )
     safety = parser.add_argument_group("safety")
     safety.add_argument(
@@ -462,16 +464,19 @@ def build_parser() -> argparse.ArgumentParser:
         parents=[common, exec_common],
         help="run the local web console",
         description=(
-            "Serve a loopback-only web console over the same discovery, "
-            "planning, and execution code as the CLI. Every /api call needs "
-            "the printed token unless --no-token is set."
+            "Serve a web console over the same discovery, planning, and "
+            "execution code as the CLI. Every /api call needs the printed "
+            "token unless --no-token is set (which also listens on all "
+            "interfaces)."
         ),
     )
     serve.add_argument(
         "--host",
-        default="127.0.0.1",
+        default=None,
         metavar="HOST",
-        help="bind address (default: 127.0.0.1; do not expose this)",
+        help=(
+            "bind address (default: 127.0.0.1, or 0.0.0.0 with --no-token)"
+        ),
     )
     serve.add_argument(
         "--port",
@@ -483,7 +488,10 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument(
         "--no-token",
         action="store_true",
-        help="disable the console token (only on a host you fully trust)",
+        help=(
+            "disable the console token and listen on all interfaces "
+            "(0.0.0.0) unless --host says otherwise"
+        ),
     )
     serve.add_argument(
         "--open",
@@ -519,6 +527,15 @@ def main(argv: list[str] | None = None) -> int:
     for name, value in _COMMON_DEFAULTS.items():
         if not hasattr(args, name):
             setattr(args, name, value)
+    # -q wins over -v: quiet promises "only the final table and errors".
+    logs.set_enabled(
+        bool(getattr(args, "verbose", False))
+        and not bool(getattr(args, "quiet", False)),
+    )
+    logs.debug(
+        "qpm %s",
+        " ".join(argv if argv is not None else sys.argv[1:]),
+    )
     if not getattr(args, "handler", None):
         parser.print_help()
         return 0

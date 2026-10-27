@@ -70,9 +70,15 @@ docker run --rm -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/ligandlly/qwenpaw-plugin-manager:latest plugins
 
 # 网页控制台：日志里会打印 token 和访问地址
+# 容器内已经绑 0.0.0.0；默认只发布到宿主机回环，要对外改 -p 8787:8787
 docker run --rm -p 127.0.0.1:8787:8787 \
   -v /var/run/docker.sock:/var/run/docker.sock \
   ghcr.io/ligandlly/qwenpaw-plugin-manager:latest
+
+# 内网无令牌访问：容器内 --no-token 已绑 0.0.0.0，宿主机发布也给全接口
+docker run --rm -p 8787:8787 \
+  -v /var/run/docker.sock:/var/run/docker.sock \
+  ghcr.io/ligandlly/qwenpaw-plugin-manager:latest serve --no-token
 ```
 
 镜像里带静态 Docker CLI，构建时不执行 pip、不依赖网络（只用 `PYTHONPATH`）。
@@ -125,6 +131,11 @@ qpm enable  offline-market --yes
 | `freeze` / `apply` | 导出状态文件 / 收敛到状态文件 |
 | `doctor` | 体检：发现、令牌、插件 API、备份能力 |
 
+排错加 `-v/--verbose`：发现过程、docker 命令、每条 HTTP 请求（方法/URL/
+状态码/耗时/重试）、规划出的每个动作、备份与回滚路径都会带 `debug:` 前缀
+打到 stderr，stdout 上的表格和 `--json` 文档不受影响。`--quiet` 优先于
+`--verbose`：只要最终表格和错误。
+
 `SOURCE` 可以是：
 
 - 单个插件目录（含 `plugin.json`）→ 本地打成可复现的 ZIP 再上传；
@@ -134,15 +145,16 @@ qpm enable  offline-market --yes
 
 ## 网页控制台
 
-CLI 之外还有一个只监听回环地址的本地控制台。浏览器拿不到 Docker socket、也连不上
-运行时的随机端口，所以必须由宿主机上的进程代理；这个服务端和 CLI **共用同一套**
-发现、计划、执行代码，不存在第二套逻辑。
+CLI 之外还有一个默认只监听回环地址的本地控制台。浏览器拿不到 Docker socket、也
+连不上运行时的随机端口，所以必须由宿主机上的进程代理；这个服务端和 CLI **共用
+同一套**发现、计划、执行代码，不存在第二套逻辑。
 
 ```bash
 qpm serve                                  # http://127.0.0.1:8787
 qpm serve --open                           # 顺便打开浏览器
 qpm serve --port 9000 --inventory /secure/inventory.json
-qpm serve --no-token                       # 明确信任本机时才用，会告警
+qpm serve --no-token                       # 关令牌，并且默认监听 0.0.0.0
+qpm serve --no-token --host 127.0.0.1      # 关令牌但只本机可访
 ```
 
 启动时打印随机令牌和带 `#token=` 的地址；页面把令牌存进 `sessionStorage`，之后所有
@@ -159,7 +171,12 @@ qpm serve --no-token                       # 明确信任本机时才用，会�
 
 安全姿态：默认只绑 `127.0.0.1`；令牌必填；写操作必须是 `application/json` 且拒绝
 跨站 `Origin`（防 CSRF），严格 CSP、`no-store`、`nosniff`；静态资源白名单；上传仅
-接受 `.zip` 且做 ZIP 合法性检查。`--no-token` 或绑到非回环地址都会在启动时告警。
+接受 `.zip` 且做 ZIP 合法性检查。
+
+`--no-token` 是给“内网里确实不想带令牌”的场景用的：此时不再限制只允许 127.0.0.1
+访问，服务默认绑到 `0.0.0.0`，并在启动时打印本机可用的局域网地址和显眼的告警。
+要关令牌但仍只允许本机访问，就显式写 `--host 127.0.0.1`；显式 `--host` 永远优先于
+`--no-token` 的默认值。
 
 ### 本地 HTTP API
 
@@ -329,7 +346,8 @@ qpm apply plugins.lock.json --json --yes > /var/log/qpm-drift.json
 
 ## JSON 输出
 
-`--json` 时 stdout 只有一份 JSON（进度和警告仍然走 stderr）：
+`--json` 时 stdout 只有一份 JSON（进度和警告仍然走 stderr；加 `-v` 时的
+`debug:` 行也只走 stderr）：
 
 ```json
 {

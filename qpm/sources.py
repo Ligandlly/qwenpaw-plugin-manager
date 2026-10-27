@@ -24,10 +24,12 @@ import json
 import os
 import shutil
 import subprocess
+import time
 from dataclasses import dataclass, field
 from pathlib import Path, PurePosixPath
 from typing import Any
 
+from . import logs
 from .errors import DiscoveryError
 from .models import RuntimeTarget
 
@@ -45,6 +47,8 @@ OWNER_LABEL = "io.qwenpaw.hub.owner-id"
 TOKEN_ENV = "QWENPAW_RUNTIME_INTERNAL_TOKEN"
 
 _DOCKER_TIMEOUT_SECONDS = 60
+
+_LOG = logs.get_logger("docker")
 
 
 @dataclass
@@ -71,6 +75,9 @@ class DiscoveryResult:
 
 
 def _run_docker(binary: str, args: list[str]) -> str:
+    command = " ".join([binary, *args])
+    _LOG.debug("$ %s", command)
+    started = time.monotonic()
     try:
         completed = subprocess.run(  # noqa: S603 - explicit argument list
             [binary, *args],
@@ -101,6 +108,12 @@ def _run_docker(binary: str, args: list[str]) -> str:
             f"docker {args[0]} failed ({completed.returncode}): "
             f"{stderr.splitlines()[-1] if stderr else 'no output'}{hint}",
         )
+    _LOG.debug(
+        "$ %s -> %d line(s) in %dms",
+        command,
+        len(completed.stdout.splitlines()),
+        int((time.monotonic() - started) * 1000),
+    )
     return completed.stdout
 
 
@@ -214,6 +227,13 @@ def discover_docker(options: DiscoveryOptions) -> DiscoveryResult:
     args += ["--format", "{{.ID}}"]
     ids = [line.strip() for line in _run_docker(binary, args).splitlines()]
     ids = [item for item in ids if item]
+    _LOG.debug(
+        "found %d Hub-managed container(s)%s",
+        len(ids),
+        f" for instance {options.docker_instance}"
+        if options.docker_instance
+        else "",
+    )
     result = DiscoveryResult(source="docker")
     if not ids:
         result.warnings.append(
@@ -237,8 +257,16 @@ def discover_docker(options: DiscoveryOptions) -> DiscoveryResult:
             container_port=options.container_port,
         )
         if target is not None:
+            _LOG.debug(
+                "runtime %s (%s) -> %s [%s]",
+                target.runtime_id,
+                target.container_name or target.container_id[:12],
+                target.base_url,
+                target.state,
+            )
             result.targets.append(target)
         elif warning:
+            _LOG.debug("skipped: %s", warning)
             result.warnings.append(warning)
     return result
 
@@ -272,6 +300,7 @@ def discover_inventory(path: Path) -> DiscoveryResult:
     path = path.expanduser()
     if not path.is_file():
         raise DiscoveryError(f"{path}: inventory file not found")
+    _LOG.debug("reading inventory %s", path)
     base = path.resolve().parent
     result = DiscoveryResult(source="inventory")
     seen: dict[str, str] = {}
@@ -309,6 +338,12 @@ def discover_inventory(path: Path) -> DiscoveryResult:
                 f"({previous} and {url})",
             )
         seen[runtime_id] = url
+        _LOG.debug(
+            "runtime %s -> %s (token %s)",
+            runtime_id,
+            url.rstrip("/"),
+            "present" if token else "missing",
+        )
         result.targets.append(
             RuntimeTarget(
                 runtime_id=runtime_id,
@@ -378,4 +413,15 @@ def select_targets(
             "use --include-stopped to include them",
         )
     selected.sort(key=lambda target: (target.runtime_id, target.base_url))
+    _LOG.debug(
+        "filters (runtime=%s tenant=%s owner=%s include_stopped=%s) "
+        "selected %d of %d runtime(s), %d skipped as stopped",
+        patterns or "-",
+        tenants or "-",
+        owners or "-",
+        include_stopped,
+        len(selected),
+        len(targets),
+        stopped,
+    )
     return selected, warnings

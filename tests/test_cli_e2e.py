@@ -672,3 +672,159 @@ def test_failure_without_host_copy_explains_missing_rollback(
     result = json.loads(out)["results"][0]
     assert result["state"] == "failed"
     assert "no rollback available" in result["message"]
+
+
+# ── --verbose ────────────────────────────────────────────────────────────
+
+
+def test_verbose_prints_debug_to_stderr_only(
+    capsys,
+    plugin_factory,
+    runtime_factory,
+    inventory_file,
+) -> None:
+    runtime = runtime_factory("rt-1")
+    inventory = inventory_file([runtime])
+    bundle = plugin_factory(version="0.1.0")
+
+    code, out, err = run(
+        capsys,
+        [
+            "install",
+            str(bundle),
+            "--inventory",
+            str(inventory),
+            "--yes",
+            "--verbose",
+        ],
+    )
+    assert code == 0
+    # Debug detail went to stderr ...
+    assert "debug: " in err
+    assert "loading bundle source" in err
+    assert "GET /api/plugins" in err
+    assert "plan rt-1: change install offline-market" in err
+    # ... and never into the result table on stdout.
+    assert "debug: " not in out
+    assert "installed 0.1.0" in out
+
+    # Without --verbose the same run stays quiet on stderr.
+    code, _, err = run(
+        capsys,
+        ["plugins", "--inventory", str(inventory), "--plugin", "offline-*"],
+    )
+    assert code == 0
+    assert "debug: " not in err
+
+
+def test_verbose_short_flag_works_after_the_subcommand(
+    capsys,
+    runtime_factory,
+    inventory_file,
+) -> None:
+    runtime = runtime_factory("rt-1")
+    inventory = inventory_file([runtime])
+    code, _, err = run(
+        capsys,
+        ["runtimes", "--inventory", str(inventory), "-v", "--probe"],
+    )
+    assert code == 0
+    assert "debug: reading inventory" in err
+
+
+def test_verbose_keeps_json_stdout_parseable(
+    capsys,
+    runtime_factory,
+    inventory_file,
+) -> None:
+    runtime = runtime_factory("rt-1")
+    inventory = inventory_file([runtime])
+    code, out, err = run(
+        capsys,
+        ["plugins", "--inventory", str(inventory), "--json", "-v"],
+    )
+    assert code == 0
+    assert "debug: " in err
+    payload = json.loads(out)
+    assert payload["runtimes"][0]["runtime_id"] == "rt-1"
+
+
+def test_quiet_suppresses_verbose(
+    capsys,
+    runtime_factory,
+    inventory_file,
+) -> None:
+    runtime = runtime_factory("rt-1")
+    inventory = inventory_file([runtime])
+    code, _, err = run(
+        capsys,
+        ["plugins", "--inventory", str(inventory), "--quiet", "--verbose"],
+    )
+    assert code == 0
+    assert err == ""
+
+
+# ── qpm serve: --no-token no longer stays on loopback ────────────────────
+
+
+def _capture_serve_config(monkeypatch) -> dict:
+    """Intercept ``qpm serve`` without binding a socket."""
+    import qpm.webapi as webapi
+
+    seen: dict = {}
+
+    def fake_serve(config):
+        seen["config"] = config
+        return 0
+
+    monkeypatch.setattr(webapi, "serve", fake_serve)
+    return seen
+
+
+def test_serve_defaults_to_loopback(capsys, tmp_path, monkeypatch) -> None:
+    seen = _capture_serve_config(monkeypatch)
+    code, _, _ = run(
+        capsys,
+        ["serve", "--inventory", str(tmp_path / "inv.json")],
+    )
+    assert code == 0
+    assert seen["config"].host == "127.0.0.1"
+    assert seen["config"].token_required is True
+
+
+def test_serve_no_token_binds_all_interfaces(
+    capsys,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    seen = _capture_serve_config(monkeypatch)
+    code, _, _ = run(
+        capsys,
+        ["serve", "--no-token", "--inventory", str(tmp_path / "inv.json")],
+    )
+    assert code == 0
+    config = seen["config"]
+    assert config.token_required is False
+    assert config.host == "0.0.0.0"
+
+
+def test_serve_no_token_honours_explicit_loopback_host(
+    capsys,
+    tmp_path,
+    monkeypatch,
+) -> None:
+    seen = _capture_serve_config(monkeypatch)
+    code, _, _ = run(
+        capsys,
+        [
+            "serve",
+            "--no-token",
+            "--host",
+            "127.0.0.1",
+            "--inventory",
+            str(tmp_path / "inv.json"),
+        ],
+    )
+    assert code == 0
+    assert seen["config"].host == "127.0.0.1"
+    assert seen["config"].token_required is False

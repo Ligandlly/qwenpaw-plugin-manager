@@ -13,6 +13,7 @@ from dataclasses import replace
 from pathlib import Path
 from typing import Any, Sequence
 
+from . import logs
 from .bundles import (
     DEFAULT_MAX_BUNDLE_BYTES,
     load_bundle_source,
@@ -191,12 +192,6 @@ def _snapshots(
             reporter.warning(
                 f"{snapshot.target.runtime_id}: inventory failed: "
                 f"{snapshot.error}",
-            )
-        else:
-            reporter.debug(
-                f"{snapshot.target.runtime_id}: qwenpaw "
-                f"{snapshot.app_version or 'unknown'}, "
-                f"{len(snapshot.plugins)} plugin(s)",
             )
     return snapshots
 
@@ -406,6 +401,15 @@ def _execute(
 ) -> int:
     actions = runtime_issue_actions(snapshots) + actions
     mutating = [action for action in actions if action.mutating]
+    for action in actions:
+        logs.debug(
+            "plan %s: %s %s %s%s",
+            action.target.runtime_id,
+            "change" if action.mutating else "no-op",
+            action.kind.value,
+            action.plugin_id,
+            f" ({action.reason})" if action.reason else "",
+        )
     reporter.info(
         f"plan: {len(mutating)} change(s), "
         f"{len(actions) - len(mutating)} no-op(s), "
@@ -883,16 +887,20 @@ def cmd_freeze(args: argparse.Namespace) -> int:
 
 
 def cmd_serve(args: argparse.Namespace) -> int:
-    """Run the loopback web console."""
-    from .webapi import WebConfig, serve
+    """Run the web console."""
+    from .webapi import WebConfig, resolve_bind_host, serve
 
     port_value = getattr(args, "port", 8787)
+    no_token = bool(getattr(args, "no_token", False))
     config = WebConfig(
         discovery=_discovery_options(args),
         exec_options=_exec_options(args),
-        host=str(getattr(args, "host", "127.0.0.1") or "127.0.0.1"),
+        host=resolve_bind_host(
+            getattr(args, "host", None),
+            token_required=not no_token,
+        ),
         port=8787 if port_value is None else int(port_value),
-        token_required=not bool(getattr(args, "no_token", False)),
+        token_required=not no_token,
         host_sdk=str(getattr(args, "host_sdk", "") or "1.0.0"),
         open_browser=bool(getattr(args, "open", False)),
     )

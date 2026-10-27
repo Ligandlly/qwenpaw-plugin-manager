@@ -9,6 +9,7 @@ import threading
 import unicodedata
 from typing import Iterable, Sequence
 
+from . import logs
 from .models import ActionResult, ActionState, RuntimeSnapshot
 
 __all__ = ["Reporter", "display_width"]
@@ -90,9 +91,10 @@ class Reporter:
 
     def debug(self, message: str) -> None:
         """Extra detail shown only with --verbose."""
-        if not self.verbose:
+        if not self.verbose or self.quiet or self.json_output:
             return
-        self.info(message)
+        logs.set_enabled(True)
+        logs.debug(message)
 
     def warning(self, message: str) -> None:
         """Non-fatal problem, always visible on stderr."""

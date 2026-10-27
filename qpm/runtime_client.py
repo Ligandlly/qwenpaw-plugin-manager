@@ -31,6 +31,7 @@ import urllib.parse
 import urllib.request
 import uuid
 
+from . import logs
 from .errors import (
     PluginAlreadyInstalled,
     PluginNotFound,
@@ -46,6 +47,8 @@ _TOKEN_HEADER = "X-QwenPaw-Runtime-Token"
 #: Statuses worth retrying: the runtime is starting, restarting, or a proxy
 #: in between had a hiccup.  Everything else is a real answer.
 _RETRY_STATUSES = frozenset({502, 503, 504})
+
+_LOG = logs.get_logger("http")
 
 #: Hub endpoints are loopback-only by design; never route them through a
 #: corporate HTTP proxy picked up from the environment.
@@ -158,16 +161,48 @@ class RuntimeClient:
                 headers=request_headers,
                 method=method,
             )
+            request_timeout = timeout or self.timeout
+            _LOG.debug(
+                "%s: %s %s (attempt %d/%d, %d byte(s), timeout %.0fs)",
+                self.target.runtime_id,
+                method,
+                url,
+                attempt,
+                attempts,
+                len(body or b""),
+                request_timeout,
+            )
+            started = time.monotonic()
             try:
                 with _opener_for(url).open(
                     request,
-                    timeout=timeout or self.timeout,
+                    timeout=request_timeout,
                 ) as response:
-                    return response.status, self._decode(response.read())
+                    status = response.status
+                    raw = response.read()
+                    _LOG.debug(
+                        "%s: %s %s -> HTTP %d in %dms (%d byte(s))",
+                        self.target.runtime_id,
+                        method,
+                        path,
+                        status,
+                        int((time.monotonic() - started) * 1000),
+                        len(raw),
+                    )
+                    return status, self._decode(raw)
             except urllib.error.HTTPError as exc:
                 status = exc.code
                 raw = self._read_error_body(exc)
                 parsed = self._decode(raw)
+                _LOG.debug(
+                    "%s: %s %s -> HTTP %d in %dms%s",
+                    self.target.runtime_id,
+                    method,
+                    path,
+                    status,
+                    int((time.monotonic() - started) * 1000),
+                    " (allowed)" if status in allow_statuses else "",
+                )
                 if status in allow_statuses:
                     return status, parsed
                 if status == 401:
@@ -192,11 +227,24 @@ class RuntimeClient:
                 )
                 if status in _RETRY_STATUSES and attempt < attempts:
                     last_error = error
+                    _LOG.debug(
+                        "%s: HTTP %d, retrying",
+                        self.target.runtime_id,
+                        status,
+                    )
                     self._sleep(attempt)
                     continue
                 raise error from exc
             except (urllib.error.URLError, TimeoutError, socket.timeout) as exc:
                 reason = getattr(exc, "reason", exc)
+                _LOG.debug(
+                    "%s: %s %s failed in %dms: %s",
+                    self.target.runtime_id,
+                    method,
+                    path,
+                    int((time.monotonic() - started) * 1000),
+                    reason,
+                )
                 last_error = RuntimeUnreachable(
                     f"{self.target.runtime_id}: cannot reach "
                     f"{self.target.base_url} ({reason})",
@@ -206,6 +254,14 @@ class RuntimeClient:
                     continue
                 raise last_error from exc
             except OSError as exc:
+                _LOG.debug(
+                    "%s: %s %s failed in %dms: %s",
+                    self.target.runtime_id,
+                    method,
+                    path,
+                    int((time.monotonic() - started) * 1000),
+                    exc,
+                )
                 last_error = RuntimeUnreachable(
                     f"{self.target.runtime_id}: transport error talking to "
                     f"{self.target.base_url} ({exc})",
@@ -219,7 +275,9 @@ class RuntimeClient:
 
     def _sleep(self, attempt: int) -> None:
         if self.backoff:
-            time.sleep(self.backoff * attempt)
+            delay = self.backoff * attempt
+            _LOG.debug("backing off %.2fs before retry", delay)
+            time.sleep(delay)
 
     @staticmethod
     def _read_error_body(exc: urllib.error.HTTPError) -> str:
