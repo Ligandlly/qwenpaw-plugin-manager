@@ -163,7 +163,7 @@ qpm serve --no-token --host 127.0.0.1      # 关令牌但只本机可访
 
 | 页面 | 能做什么 |
 | --- | --- |
-| Inventory | 每个运行时一条"暗盒"：端口、QwenPaw 版本、租户、每个插件槽的版本/启停/健康，行内 Enable / Disable / Uninstall |
+| Inventory | 每个运行时一条"暗盒"：用户名、端口、QwenPaw 版本、租户、每个插件槽的版本/启停/健康，行内 Enable / Disable / Uninstall |
 | Install & upgrade | 拖入 `.zip`、填宿主机路径或 URL，选 mode 后 **Preview plan** → **Run changes**；计划逐条给出 install/upgrade/skip 与原因 |
 | Uninstall | 从当前选中目标的已装插件里点选（chips），可只卸载保留文件，先预览再执行 |
 | Apply state | 粘贴/上传 state JSON，或从某个运行时 Freeze 后下载；无 source 的条目变成漂移检查 |
@@ -172,6 +172,13 @@ qpm serve --no-token --host 127.0.0.1      # 关令牌但只本机可访
 安全姿态：默认只绑 `127.0.0.1`；令牌必填；写操作必须是 `application/json` 且拒绝
 跨站 `Origin`（防 CSRF），严格 CSP、`no-store`、`nosniff`；静态资源白名单；上传仅
 接受 `.zip` 且做 ZIP 合法性检查。
+
+控制台把运行时**显示成它所属用户的用户名**，但接口、过滤器和执行仍然全部使用
+Hub 的 runtime id（容器标签），所以显示名字改了也不会影响后端行为。用户名是只读
+查出来的：默认自动探测 Hub 的 `control.db`（`$QPM_HUB_DB` /
+`$QWENPAW_HUB_DIR/control.db` / `$QWENPAW_WORKING_DIR/hub/control.db` /
+`~/.qwenpaw/hub/control.db`），也可以用 `--hub-db FILE` 指定；查不到时照旧显示
+runtime id。`--inventory` 清单里的 `username` 字段优先级最高。
 
 `--no-token` 是给“内网里确实不想带令牌”的场景用的：此时不再限制只允许 127.0.0.1
 访问，服务默认绑到 `0.0.0.0`，并在启动时打印本机可用的局域网地址和显眼的告警。
@@ -262,6 +269,7 @@ qpm runtimes --inventory /secure/inventory.json --probe  # 之后都用它
 | `--runtime GLOB` | 运行时 ID 或容器名 |
 | `--tenant GLOB` | 租户 ID（`QWENPAW_TENANT_ID`） |
 | `--owner GLOB` | Hub 用户 ID |
+| `--hub-db FILE` | Hub `control.db` 路径，仅用于控制台把 owner 显示成用户名；默认自动探测 |
 | `--plugin GLOB` | 插件 ID（`install/apply` 里筛 bundle，`plugins` 里筛展示） |
 | `--protect GLOB` | 永不触碰的插件（默认空，建议把底座插件写进去） |
 | `--include-stopped` | 带上未运行的运行时 |
@@ -389,8 +397,9 @@ qpm apply plugins.lock.json --json --yes > /var/log/qpm-drift.json
 - **不导出/下载**运行时上已有的插件，所以没有"从运行时 A 复制到 B"。要跨环境分发，
   请用制品库里的 zip/目录作为 `SOURCE`。
 - **不管插件配置**（`config.plugins.<id>`）：只做安装/升级/卸载/启停。配置属于租户数据。
-- **不读 Hub 数据库**：令牌只从容器环境拿。如果只想读运行时而拿不到 Docker，
-  用 `--inventory`。
+- **不依赖 Hub 数据库**：令牌只从容器环境拿，安装/升级/卸载/回滚都不需要
+  `control.db`。控制台只是**只读**地看 `hub_users` 把 owner id 换成用户名显示；
+  拿不到就显示 runtime id。如果只想读运行时而拿不到 Docker，用 `--inventory`。
 - **不做定时调度**：交给 cron / systemd timer 调 `qpm apply`。
 - **单宿主机**：一次运行只面向一个 Docker 端点；多宿主机就多跑几个 qpm。
 - **不猜 SDK 版本**：插件库跟着 QwenPaw 升 SDK major 时，用 `--host-sdk` 或环境变量

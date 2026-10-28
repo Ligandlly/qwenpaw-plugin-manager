@@ -4,13 +4,15 @@
     "Generate the real thing with: qpm runtimes --save-inventory /secure/inventory.json",
     "token_env is preferred over inline token when the file may be read by others.",
     "plugins_dir is the HOST path mounted at 'workspace' plus '/plugins'; it only",
-    "enables host-side backups/rollback and may be omitted."
+    "enables host-side backups/rollback and may be omitted.",
+    "username is display-only: the console shows it instead of the runtime id."
   ],
   "runtimes": [
     {
       "runtime_id": "rt-a1b2c3",
       "tenant_id": "tenant-a",
       "owner_id": "user-5f2c",
+      "username": "alice",
       "url": "http://127.0.0.1:32768",
       "token_env": "QPM_TOKEN_RT_A",
       "state": "running",

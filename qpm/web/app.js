@@ -249,9 +249,16 @@ function visibleRuntimes() {
     if (!needle) return true;
     return (
       runtime.runtime_id.toLowerCase().includes(needle) ||
+      (runtime.username || '').toLowerCase().includes(needle) ||
+      (runtime.owner_id || '').toLowerCase().includes(needle) ||
       (runtime.tenant_id || '').toLowerCase().includes(needle)
     );
   });
+}
+
+/* Humans see the owner's username; requests and plans keep using runtime_id. */
+function displayName(runtime) {
+  return (runtime && (runtime.username || runtime.runtime_id)) || '—';
 }
 
 function renderTargets() {
@@ -278,13 +285,13 @@ function renderTargets() {
       {
         class: 'target',
         dataset: { state: runtime.state },
-        title: `${runtime.base_url}${runtime.tenant_id ? ` · ${runtime.tenant_id}` : ''}`,
+        title: `${runtime.runtime_id} · ${runtime.base_url}${runtime.tenant_id ? ` · ${runtime.tenant_id}` : ''}`,
       },
       [
         checkbox,
         el('span', { class: 'lamp', dataset: { state: lampFor(runtime) } }),
         el('span', {}, [
-          el('span', { class: 'target__id', text: runtime.runtime_id }),
+          el('span', { class: 'target__id', text: displayName(runtime) }),
           el('span', {
             class: 'target__tenant',
             text: runtime.tenant_id || 'no tenant',
@@ -384,7 +391,11 @@ function renderUnit(runtime, needle) {
   );
   const head = el('header', { class: 'unit__head' }, [
     el('span', { class: 'lamp', dataset: { state: lampFor(runtime) } }),
-    el('span', { class: 'unit__id', text: runtime.runtime_id }),
+    el('span', {
+      class: 'unit__id',
+      text: displayName(runtime),
+      title: `runtime ${runtime.runtime_id}`,
+    }),
     el('span', { class: 'unit__port', text: portOf(runtime.base_url) ? `:${portOf(runtime.base_url)}` : 'no port' }),
     el('span', { class: 'unit__meta' }, [
       'qwenpaw ',
@@ -544,7 +555,7 @@ function renderPlan(container, plan) {
             text: action.action,
           }),
         ]),
-        el('span', { class: 'mono', text: action.runtime_id }),
+        el('span', { class: 'mono', text: displayName(action), title: action.runtime_id }),
         el('span', { class: 'mono', text: action.plugin }),
         el('span', { class: 'mono dim', text: transition(action) }),
         el('span', {
@@ -653,7 +664,7 @@ async function quickOperation(operation, runtime, pluginId) {
       title: `${operation === 'uninstall' ? 'Uninstall' : operation === 'enable' ? 'Enable' : 'Disable'} ${pluginId}?`,
       body: [
         el('p', {
-          text: `Runtime ${runtime.runtime_id}, currently at ${pluginVersion(runtime, pluginId) || 'unknown version'}.`,
+          text: `Runtime ${displayName(runtime)}, currently at ${pluginVersion(runtime, pluginId) || 'unknown version'}.`,
         }),
         operation === 'uninstall'
           ? el('p', { text: 'The plugin directory is snapshotted on the host first, so a failed removal can be restored.' })
@@ -845,7 +856,7 @@ function renderFreezeOptions() {
     select.append(
       el('option', {
         value: runtime.runtime_id,
-        text: `${runtime.runtime_id}${runtime.error ? ' (unreachable)' : ''}`,
+        text: `${displayName(runtime)}${runtime.username ? ` (${runtime.runtime_id})` : ''}${runtime.error ? ' (unreachable)' : ''}`,
       }),
     );
   }
@@ -987,7 +998,7 @@ function renderJob(job) {
               text: result.state,
             }),
           ]),
-          el('span', { class: 'mono', text: result.runtime_id }),
+          el('span', { class: 'mono', text: displayName(result), title: result.runtime_id }),
           el('span', { class: 'mono', text: result.plugin }),
           el('span', { class: 'mono dim', text: resultChange(result) }),
           el('span', { class: 'dim', text: result.message || '' }),

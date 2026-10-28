@@ -96,7 +96,19 @@ planner 把关。同 `id` 不同 `version` 的包就是一次替换，不需要�
   时退回 `min_version`/`max_version`。qpm 复刻"只强制下界 + 上界仅提示"。
 - **SKILL 扫描**与插件无关，此处不涉及。
 
-## 5. 升级 QwenPaw 后要复查的点
+## 5. 控制台里的用户名（仅显示）
+
+Hub 的 `control.db`（`get_hub_root()`，默认 `~/.qwenpaw/hub/`）里 `hub_users`
+表提供 `user_id -> username`。控制台只**只读**查这张表，把运行时的 `owner-id`
+换成用户名显示；发现、计划、执行、过滤器和 `--json` 输出仍然只认 runtime id。
+
+- 优先级：inventory 的 `username` 字段 > `control.db` 查询 > runtime id；
+- 路径：`--hub-db` / `$QPM_HUB_DB` / `$QWENPAW_HUB_DIR/control.db` /
+  `$QWENPAW_WORKING_DIR/hub/control.db` / `~/.qwenpaw/hub/control.db` /
+  `~/.copaw/hub/control.db` / `/app/working/hub/control.db`；
+- 数据库不存在、无权限或缺表时静默退回 runtime id，`qpm -v` 会打印原因。
+
+## 6. 升级 QwenPaw 后要复查的点
 
 1. `docker_provisioner._labels()` / `start()` 的标签、环境变量、端口是否变了；
 2. `auth.py` 的边界令牌头名与"全放行"语义是否变了；

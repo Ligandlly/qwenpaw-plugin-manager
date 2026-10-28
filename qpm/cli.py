@@ -36,6 +36,7 @@ _COMMON_DEFAULTS: dict[str, object] = {
     "docker_bin": _ENV.get("QPM_DOCKER_BIN", "docker"),
     "docker_instance": _ENV.get("QPM_DOCKER_INSTANCE", ""),
     "container_port": int(_ENV.get("QPM_CONTAINER_PORT", "8088") or 8088),
+    "hub_db": None,
     "runtime": [],
     "tenant": [],
     "owner": [],
@@ -105,6 +106,16 @@ def _common_parser() -> argparse.ArgumentParser:
         default=argparse.SUPPRESS,
         metavar="PORT",
         help="runtime API port inside the container (default: 8088)",
+    )
+    group.add_argument(
+        "--hub-db",
+        type=Path,
+        default=argparse.SUPPRESS,
+        metavar="FILE",
+        help=(
+            "Hub control.db used to show owner usernames in the console "
+            "(default: auto-detect; only for display)"
+        ),
     )
     filters = parser.add_argument_group("filters")
     filters.add_argument(

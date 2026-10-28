@@ -67,6 +67,8 @@ class RuntimeTarget:
     token: str
     tenant_id: str = ""
     owner_id: str = ""
+    #: Display-only Hub username; never used to address the runtime.
+    username: str = ""
     state: str = "running"
     image: str = ""
     container_id: str = ""
@@ -85,6 +87,15 @@ class RuntimeTarget:
     def label(self) -> str:
         """Short human-readable identity used in tables and messages."""
         return self.runtime_id
+
+    @property
+    def display_name(self) -> str:
+        """Owner username for the console, falling back to the runtime id.
+
+        The runtime id stays the identity for filters, API calls and reports;
+        this is only what a human sees.
+        """
+        return self.username or self.runtime_id
 
     @property
     def key(self) -> str:

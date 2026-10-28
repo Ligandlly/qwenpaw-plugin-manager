@@ -186,6 +186,8 @@ def test_inventory_lists_runtime(web: WebFixture) -> None:
     assert len(payload["runtimes"]) == 1
     row = payload["runtimes"][0]
     assert row["runtime_id"] == "rt-1"
+    assert row["username"] == ""
+    assert row["display_name"] == "rt-1"
     assert row["qwenpaw_version"] == "2.2.2"
     assert row["plugins"] == []
     assert row["state"] == "running"
@@ -197,6 +199,29 @@ def test_runtimes_endpoint_does_not_probe(web: WebFixture) -> None:
     assert payload["runtimes"][0]["runtime_id"] == "rt-1"
     # The cheap endpoint must not touch the runtime API.
     assert web.runtime.requests == []
+
+
+def test_runtimes_payload_labels_runtimes_with_the_owner(
+    runtime_factory,
+    inventory_file,
+) -> None:
+    runtime = runtime_factory("rt-1")
+    inventory = inventory_file([runtime])
+    document = json.loads(inventory.read_text(encoding="utf-8"))
+    document["runtimes"][0]["username"] = "alice"
+    inventory.write_text(json.dumps(document), encoding="utf-8")
+    fixture = _start(inventory, runtime)
+    try:
+        status, _, payload = fixture.client.get_json("/api/runtimes")
+        assert status == 200
+        row = payload["runtimes"][0]
+        # The console shows the username ...
+        assert row["username"] == "alice"
+        assert row["display_name"] == "alice"
+        # ... while plans, filters and API calls keep the runtime id.
+        assert row["runtime_id"] == "rt-1"
+    finally:
+        fixture.stop()
 
 
 def test_plan_install_has_no_side_effects(web: WebFixture, plugin_factory) -> None:

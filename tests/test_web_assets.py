@@ -38,6 +38,15 @@ def test_javascript_avoids_html_sinks() -> None:
     assert "eval(" not in script
 
 
+def test_console_displays_the_owner_not_the_runtime_id() -> None:
+    script = _read("app.js")
+    # The unit/target labels prefer the username ...
+    assert "runtime.username || runtime.runtime_id" in script
+    # ... while selection, filters and API payloads keep the runtime id.
+    assert "state.selected.has(runtime.runtime_id)" in script
+    assert "runtime: [runtime.runtime_id]" in script
+
+
 def test_styles_use_the_documented_tokens() -> None:
     css = _read("styles.css")
     for token in ("--ink", "--paper", "--signal", "--live", "--alarm", "--mono"):

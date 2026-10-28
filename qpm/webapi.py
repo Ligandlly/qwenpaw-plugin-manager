@@ -276,6 +276,8 @@ def _target_dict(target: RuntimeTarget) -> dict[str, Any]:
         "runtime_id": target.runtime_id,
         "tenant_id": target.tenant_id,
         "owner_id": target.owner_id,
+        "username": target.username,
+        "display_name": target.display_name,
         "state": target.state,
         "base_url": target.base_url,
         "container_name": target.container_name,
@@ -290,6 +292,7 @@ def _action_dict(action: Action) -> dict[str, Any]:
     return {
         "runtime_id": action.target.runtime_id,
         "tenant_id": action.target.tenant_id,
+        "username": action.target.username,
         "plugin": action.plugin_id,
         "action": action.kind.value,
         "current_version": action.current_version,
@@ -306,6 +309,7 @@ def _result_dict(result: ActionResult) -> dict[str, Any]:
     return {
         "runtime_id": result.action.target.runtime_id,
         "tenant_id": result.action.target.tenant_id,
+        "username": result.action.target.username,
         "plugin": result.action.plugin_id,
         "action": result.action.kind.value,
         "state": result.state.value,

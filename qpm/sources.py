@@ -11,7 +11,9 @@ QwenPaw Hub's Docker provisioner labels every runtime container with
 and injects ``QWENPAW_RUNTIME_INTERNAL_TOKEN`` into the container environment.
 That is everything this tool needs: the runtime endpoint is a loopback-published
 port, authenticated with the same boundary token the Hub uses for readiness
-checks.  No Hub database, no Fernet key, no QwenPaw import.
+checks.  No Hub database, no Fernet key, no QwenPaw import.  Hub's
+``control.db`` is consulted read-only afterwards, and only to label runtimes
+with their owner's username in the console.
 
 When the Hub host's Docker socket is not reachable from where the manager runs,
 ``--inventory inventory.json`` supplies the same facts by hand.
@@ -25,12 +27,13 @@ import os
 import shutil
 import subprocess
 import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from pathlib import Path, PurePosixPath
 from typing import Any
 
 from . import logs
 from .errors import DiscoveryError
+from .hub_users import HubUserDirectory
 from .models import RuntimeTarget
 
 __all__ = [
@@ -60,6 +63,9 @@ class DiscoveryOptions:
     docker_instance: str = ""
     include_stopped: bool = False
     container_port: int = 8088
+    #: Hub ``control.db`` used to resolve owner ids to usernames for display.
+    #: Auto-detected when omitted; never required.
+    hub_db: Path | None = None
 
 
 @dataclass
@@ -351,6 +357,7 @@ def discover_inventory(path: Path) -> DiscoveryResult:
                 token=token,
                 tenant_id=str(entry.get("tenant_id") or ""),
                 owner_id=str(entry.get("owner_id") or ""),
+                username=str(entry.get("username") or ""),
                 state=str(entry.get("state") or "running"),
                 image=str(entry.get("image") or ""),
                 container_id=str(entry.get("container_id") or ""),
@@ -372,8 +379,40 @@ def discover_inventory(path: Path) -> DiscoveryResult:
 def discover_runtimes(options: DiscoveryOptions) -> DiscoveryResult:
     """Discover runtimes from the configured source."""
     if options.inventory is not None:
-        return discover_inventory(options.inventory)
-    return discover_docker(options)
+        result = discover_inventory(options.inventory)
+    else:
+        result = discover_docker(options)
+    return _with_usernames(result, options.hub_db)
+
+
+def _with_usernames(
+    result: DiscoveryResult,
+    hub_db: Path | None,
+) -> DiscoveryResult:
+    """Attach owner usernames for display; the runtime id stays the identity."""
+    missing = [
+        target
+        for target in result.targets
+        if target.owner_id and not target.username
+    ]
+    if not missing:
+        return result
+    directory = HubUserDirectory(hub_db)
+    if not directory.available:
+        return result
+    result.targets = [
+        target
+        if target.username
+        else replace(target, username=directory.username(target.owner_id))
+        for target in result.targets
+    ]
+    resolved = sum(1 for target in result.targets if target.username)
+    _LOG.debug(
+        "resolved %d of %d owner username(s) from Hub",
+        resolved,
+        len(result.targets),
+    )
+    return result
 
 
 def _matches(pattern: str, value: str) -> bool:

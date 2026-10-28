@@ -88,12 +88,14 @@ def _reporter(args: argparse.Namespace) -> Reporter:
 
 def _discovery_options(args: argparse.Namespace) -> DiscoveryOptions:
     inventory = getattr(args, "inventory", None)
+    hub_db = getattr(args, "hub_db", None)
     return DiscoveryOptions(
         inventory=Path(inventory).expanduser() if inventory else None,
         docker_bin=str(getattr(args, "docker_bin", "") or "docker"),
         docker_instance=str(getattr(args, "docker_instance", "") or ""),
         include_stopped=bool(getattr(args, "include_stopped", False)),
         container_port=int(getattr(args, "container_port", 8088) or 8088),
+        hub_db=Path(hub_db).expanduser() if hub_db else None,
     )
 
 
@@ -293,6 +295,7 @@ def _payload(
                 "runtime_id": target.runtime_id,
                 "tenant_id": target.tenant_id,
                 "owner_id": target.owner_id,
+                "username": target.username,
                 "state": target.state,
                 "base_url": target.base_url,
                 "container_name": target.container_name,
@@ -471,6 +474,7 @@ def cmd_runtimes(args: argparse.Namespace) -> int:
                         "runtime_id": target.runtime_id,
                         "tenant_id": target.tenant_id,
                         "owner_id": target.owner_id,
+                        "username": target.username,
                         "state": target.state,
                         "base_url": target.base_url,
                         "container_name": target.container_name,
@@ -540,6 +544,7 @@ def _save_inventory(
                 "runtime_id": target.runtime_id,
                 "tenant_id": target.tenant_id,
                 "owner_id": target.owner_id,
+                "username": target.username,
                 "url": target.base_url,
                 "token": target.token,
                 "state": target.state,
@@ -978,6 +983,7 @@ def _doctor_row(
     record: dict[str, Any] = {
         "runtime_id": target.runtime_id,
         "tenant_id": target.tenant_id,
+        "username": target.username,
         "state": target.state,
         "endpoint": target.base_url,
         "token": "present",
